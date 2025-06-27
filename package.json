@@ -4,7 +4,7 @@
   "description": "Enhanced Model Context Protocol server for Obsidian vault management with AI-powered knowledge graph operations",
   "repository": {
     "type": "git",
-    "url": "https://github.com/kayaozkur/mcp-server-obsidian.git"
+    "url": "git+https://github.com/kayaozkur/mcp-server-obsidian.git"
   },
   "homepage": "https://github.com/kayaozkur/mcp-server-obsidian#readme",
   "bugs": {
@@ -13,7 +13,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "@lepion/mcp-server-obsidian": "dist/index.js"
+    "mcp-server-obsidian": "dist/index.js"
   },
   "files": [
     "dist/**/*",

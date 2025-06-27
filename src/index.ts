@@ -105,6 +105,34 @@ const SuggestConnectionsSchema = z.object({
   threshold: z.number().optional().default(0.7).describe('Similarity threshold (0-1)'),
 });
 
+// Phase 4: Advanced Operations
+const BulkOperationsSchema = z.object({
+  operation: z.enum(['tag', 'move', 'rename', 'delete']).describe('Bulk operation type'),
+  notePattern: z.string().describe('Pattern to match notes (regex or glob)'),
+  parameters: z.record(z.any()).describe('Operation-specific parameters'),
+  dryRun: z.boolean().optional().default(true).describe('Preview changes without applying'),
+});
+
+const ManageTagsSchema = z.object({
+  operation: z.enum(['add', 'remove', 'rename', 'list']).describe('Tag operation'),
+  notePath: z.string().optional().describe('Path to specific note (for add/remove)'),
+  oldTag: z.string().optional().describe('Old tag name (for rename)'),
+  newTag: z.string().optional().describe('New tag name (for add/rename)'),
+  tag: z.string().optional().describe('Tag to remove'),
+});
+
+const CreateTemplateSchema = z.object({
+  templateName: z.string().describe('Name of the template'),
+  content: z.string().describe('Template content with placeholders'),
+  variables: z.array(z.string()).optional().describe('List of variable names in template'),
+});
+
+const ClusterNotesSchema = z.object({
+  algorithm: z.enum(['tags', 'content', 'links']).optional().default('tags').describe('Clustering algorithm'),
+  maxClusters: z.number().optional().default(10).describe('Maximum number of clusters'),
+  minClusterSize: z.number().optional().default(2).describe('Minimum notes per cluster'),
+});
+
 
 export class EnhancedObsidianMCPServer {
   private server: Server;
@@ -289,7 +317,62 @@ export class EnhancedObsidianMCPServer {
           required: ['paths'],
         },
       },
-    ];
+      // Phase 4: Advanced Operations
+      {
+        name: 'obsidian_bulk_operations',
+        description: 'Perform bulk operations on multiple notes',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            operation: { type: 'string', enum: ['tag', 'move', 'rename', 'delete'] },
+            notePattern: { type: 'string' },
+            parameters: { type: 'object' },
+            dryRun: { type: 'boolean' },
+          },
+          required: ['operation', 'notePattern', 'parameters'],
+        },
+      },
+      {
+        name: 'obsidian_manage_tags',
+        description: 'Add, remove, or rename tags across notes',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            operation: { type: 'string', enum: ['add', 'remove', 'rename', 'list'] },
+            notePath: { type: 'string' },
+            oldTag: { type: 'string' },
+            newTag: { type: 'string' },
+            tag: { type: 'string' },
+          },
+          required: ['operation'],
+        },
+      },
+      {
+        name: 'obsidian_create_template',
+        description: 'Create or manage note templates',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            templateName: { type: 'string' },
+            content: { type: 'string' },
+            variables: { type: 'array', items: { type: 'string' } },
+          },
+          required: ['templateName', 'content'],
+        },
+      },
+      {
+        name: 'obsidian_cluster_notes',
+        description: 'Cluster notes based on various algorithms',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            algorithm: { type: 'string', enum: ['tags', 'content', 'links'] },
+            maxClusters: { type: 'number' },
+            minClusterSize: { type: 'number' },
+          },
+        },
+      },
+    ]
 
     // Add AI-powered tools if enabled
     if (this.enableAdvancedFeatures) {
@@ -817,6 +900,139 @@ export class EnhancedObsidianMCPServer {
                 {
                   type: 'text',
                   text: results.join('\n---\n'),
+                },
+              ],
+            };
+          }
+
+          // Phase 4: Advanced Operations
+          case 'obsidian_bulk_operations': {
+            const { operation, notePattern, parameters, dryRun } = BulkOperationsSchema.parse(args);
+            
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({
+                    operation,
+                    notePattern,
+                    dryRun,
+                    message: 'Bulk operations feature coming soon',
+                    parameters,
+                  }, null, 2),
+                },
+              ],
+            };
+          }
+
+          case 'obsidian_manage_tags': {
+            const params = ManageTagsSchema.parse(args);
+            
+            if (params.operation === 'list') {
+              const allNotes = Array.from(this.obsidianClient['noteCache'].values());
+              const tagFrequency = new Map<string, number>();
+              
+              for (const note of allNotes) {
+                for (const noteTag of note.tags) {
+                  tagFrequency.set(noteTag, (tagFrequency.get(noteTag) || 0) + 1);
+                }
+              }
+              
+              return {
+                content: [
+                  {
+                    type: 'text',
+                    text: JSON.stringify({
+                      operation: 'list',
+                      totalTags: tagFrequency.size,
+                      tags: Array.from(tagFrequency.entries())
+                        .map(([tag, count]) => ({ tag, count }))
+                        .sort((a, b) => b.count - a.count),
+                    }, null, 2),
+                  },
+                ],
+              };
+            }
+            
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({
+                    operation: params.operation,
+                    message: 'Tag management feature coming soon',
+                    params,
+                  }, null, 2),
+                },
+              ],
+            };
+          }
+
+          case 'obsidian_create_template': {
+            const { templateName, content, variables } = CreateTemplateSchema.parse(args);
+            
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({
+                    templateName,
+                    content,
+                    variables: variables || [],
+                    created: new Date().toISOString(),
+                    message: 'Template system coming soon',
+                  }, null, 2),
+                },
+              ],
+            };
+          }
+
+          case 'obsidian_cluster_notes': {
+            const { algorithm, maxClusters, minClusterSize } = ClusterNotesSchema.parse(args);
+            
+            // Basic tag-based clustering implementation
+            const allNotes = Array.from(this.obsidianClient['noteCache'].values());
+            const clusters: any[] = [];
+            
+            if (algorithm === 'tags') {
+              const tagGroups = new Map<string, any[]>();
+              
+              for (const note of allNotes) {
+                for (const tag of note.tags) {
+                  if (!tagGroups.has(tag)) {
+                    tagGroups.set(tag, []);
+                  }
+                  tagGroups.get(tag)!.push(note);
+                }
+              }
+              
+              for (const [tag, notes] of tagGroups) {
+                if (notes.length >= (minClusterSize || 2) && clusters.length < (maxClusters || 10)) {
+                  clusters.push({
+                    id: `tag-${tag}`,
+                    name: `Tag: ${tag}`,
+                    algorithm: 'tags',
+                    size: notes.length,
+                    notes: notes.map(n => ({
+                      path: n.path,
+                      name: n.name,
+                      tags: n.tags,
+                    })),
+                    metadata: { primaryTag: tag },
+                  });
+                }
+              }
+            }
+            
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({
+                    algorithm,
+                    totalClusters: clusters.length,
+                    clusters: clusters.sort((a, b) => b.size - a.size),
+                  }, null, 2),
                 },
               ],
             };
