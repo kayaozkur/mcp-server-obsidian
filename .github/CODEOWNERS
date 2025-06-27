@@ -1,0 +1,40 @@
+# Code ownership and review requirements for multi-agent development
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Global ownership - require review for all changes
+* @kayaozkur
+
+# Critical files require additional review
+package.json @kayaozkur
+package-lock.json @kayaozkur
+tsconfig.json @kayaozkur
+jest.config.js @kayaozkur
+
+# Source code ownership
+src/ @kayaozkur
+src/index.ts @kayaozkur
+src/**/index.ts @kayaozkur
+
+# Tests require review
+src/__tests__/ @kayaozkur
+**/*.test.ts @kayaozkur
+**/*.spec.ts @kayaozkur
+
+# Documentation
+README.md @kayaozkur
+CLAUDE.md @kayaozkur
+docs/ @kayaozkur
+
+# GitHub workflows and automation
+.github/ @kayaozkur
+.github/workflows/ @kayaozkur
+.github/CODEOWNERS @kayaozkur
+
+# Configuration files
+.eslintrc* @kayaozkur
+.prettierrc* @kayaozkur
+.gitignore @kayaozkur
+
+# Release and deployment
+dist/ @kayaozkur
+build/ @kayaozkur

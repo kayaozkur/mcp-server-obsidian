@@ -1,0 +1,287 @@
+name: Automated Code Review & Quality Enforcement
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  # Automated code review with detailed feedback
+  code-review:
+    name: Automated Code Review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    
+    steps:
+    - name: Checkout PR
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        ref: ${{ github.event.pull_request.head.sha }}
+        
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18.x'
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Analyze code changes
+      id: analyze
+      run: |
+        echo "🔍 Analyzing code changes..."
+        
+        # Get changed files
+        CHANGED_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }})
+        echo "changed_files<<EOF" >> $GITHUB_OUTPUT
+        echo "$CHANGED_FILES" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+        
+        # Count changes
+        LINES_ADDED=$(git diff --numstat ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }} | awk '{sum+=$1} END {print sum}')
+        LINES_DELETED=$(git diff --numstat ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }} | awk '{sum+=$2} END {print sum}')
+        
+        echo "lines_added=$LINES_ADDED" >> $GITHUB_OUTPUT
+        echo "lines_deleted=$LINES_DELETED" >> $GITHUB_OUTPUT
+        
+        # Check change size
+        TOTAL_CHANGES=$((LINES_ADDED + LINES_DELETED))
+        if [ "$TOTAL_CHANGES" -gt 500 ]; then
+          echo "large_pr=true" >> $GITHUB_OUTPUT
+        else
+          echo "large_pr=false" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Code quality checks
+      id: quality
+      run: |
+        echo "📊 Running quality checks..."
+        
+        # TypeScript compilation
+        if npm run build 2>/dev/null; then
+          echo "typescript_ok=true" >> $GITHUB_OUTPUT
+        else
+          echo "typescript_ok=false" >> $GITHUB_OUTPUT
+        fi
+        
+        # Linting
+        if npm run lint 2>/dev/null; then
+          echo "lint_ok=true" >> $GITHUB_OUTPUT
+        else
+          echo "lint_ok=false" >> $GITHUB_OUTPUT
+        fi
+        
+        # Tests
+        if npm test 2>/dev/null; then
+          echo "tests_ok=true" >> $GITHUB_OUTPUT
+        else
+          echo "tests_ok=false" >> $GITHUB_OUTPUT
+        fi
+        
+        # Coverage check
+        COVERAGE=$(npm run test:coverage 2>/dev/null | grep -oP 'All files\s+\|\s+\K\d+(?=\.\d+)' || echo "0")
+        echo "coverage=$COVERAGE" >> $GITHUB_OUTPUT
+        
+        if [ "$COVERAGE" -ge 50 ]; then
+          echo "coverage_ok=true" >> $GITHUB_OUTPUT
+        else
+          echo "coverage_ok=false" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Security analysis
+      id: security
+      run: |
+        echo "🔒 Running security analysis..."
+        
+        # Check for potential security issues
+        SECURITY_ISSUES=0
+        
+        # Check for console.log statements
+        if grep -r "console\.log" src/ 2>/dev/null; then
+          echo "console_logs=true" >> $GITHUB_OUTPUT
+          SECURITY_ISSUES=$((SECURITY_ISSUES + 1))
+        else
+          echo "console_logs=false" >> $GITHUB_OUTPUT
+        fi
+        
+        # Check for eval usage
+        if grep -r "eval(" src/ 2>/dev/null; then
+          echo "eval_usage=true" >> $GITHUB_OUTPUT
+          SECURITY_ISSUES=$((SECURITY_ISSUES + 1))
+        else
+          echo "eval_usage=false" >> $GITHUB_OUTPUT
+        fi
+        
+        # Check for hardcoded secrets patterns
+        if grep -rE "(password|secret|key|token)\s*=\s*['\"][^'\"]+['\"]" src/ 2>/dev/null; then
+          echo "hardcoded_secrets=true" >> $GITHUB_OUTPUT
+          SECURITY_ISSUES=$((SECURITY_ISSUES + 1))
+        else
+          echo "hardcoded_secrets=false" >> $GITHUB_OUTPUT
+        fi
+        
+        echo "security_issues=$SECURITY_ISSUES" >> $GITHUB_OUTPUT
+        
+    - name: Generate review comment
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const analyze = ${{ steps.analyze.outputs }};
+          const quality = ${{ steps.quality.outputs }};
+          const security = ${{ steps.security.outputs }};
+          
+          let reviewBody = `## 🤖 Automated Code Review\n\n`;
+          
+          // Change summary
+          reviewBody += `### 📊 Change Summary\n`;
+          reviewBody += `- **Files changed:** ${analyze.changed_files.split('\n').filter(f => f.trim()).length}\n`;
+          reviewBody += `- **Lines added:** ${analyze.lines_added || 0}\n`;
+          reviewBody += `- **Lines deleted:** ${analyze.lines_deleted || 0}\n\n`;
+          
+          if (analyze.large_pr === 'true') {
+            reviewBody += `⚠️ **Large PR detected** - Consider breaking into smaller changes for easier review.\n\n`;
+          }
+          
+          // Quality checks
+          reviewBody += `### ✅ Quality Checks\n`;
+          reviewBody += `- TypeScript compilation: ${quality.typescript_ok === 'true' ? '✅' : '❌'}\n`;
+          reviewBody += `- Linting: ${quality.lint_ok === 'true' ? '✅' : '❌'}\n`;
+          reviewBody += `- Tests: ${quality.tests_ok === 'true' ? '✅' : '❌'}\n`;
+          reviewBody += `- Coverage: ${quality.coverage}% ${quality.coverage_ok === 'true' ? '✅' : '❌'}\n\n`;
+          
+          // Security analysis
+          reviewBody += `### 🔒 Security Analysis\n`;
+          if (security.security_issues === '0') {
+            reviewBody += `✅ No security issues detected\n\n`;
+          } else {
+            reviewBody += `⚠️ **${security.security_issues} potential security issue(s) found:**\n`;
+            if (security.console_logs === 'true') reviewBody += `- Console.log statements detected (remove for production)\n`;
+            if (security.eval_usage === 'true') reviewBody += `- eval() usage detected (security risk)\n`;
+            if (security.hardcoded_secrets === 'true') reviewBody += `- Potential hardcoded secrets detected\n`;
+            reviewBody += `\n`;
+          }
+          
+          // Recommendations
+          reviewBody += `### 💡 Recommendations\n`;
+          
+          if (quality.typescript_ok === 'false') {
+            reviewBody += `- ❌ Fix TypeScript compilation errors before merging\n`;
+          }
+          if (quality.lint_ok === 'false') {
+            reviewBody += `- ❌ Fix linting issues: \`npm run lint\`\n`;
+          }
+          if (quality.tests_ok === 'false') {
+            reviewBody += `- ❌ Fix failing tests: \`npm test\`\n`;
+          }
+          if (quality.coverage_ok === 'false') {
+            reviewBody += `- ⚠️ Improve test coverage (current: ${quality.coverage}%, required: 50%)\n`;
+          }
+          
+          reviewBody += `\n---\n*This review was generated automatically. Please address any ❌ issues before merging.*`;
+          
+          await github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: reviewBody
+          });
+
+  # Approval gate based on automated checks
+  approval-gate:
+    name: Approval Gate
+    runs-on: ubuntu-latest
+    needs: code-review
+    if: github.event_name == 'pull_request'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18.x'
+        cache: 'npm'
+        
+    - name: Run required checks
+      id: gate
+      run: |
+        npm ci
+        
+        # All these must pass for approval
+        npm run build
+        npm run lint  
+        npm test
+        
+        # Coverage check
+        COVERAGE=$(npm run test:coverage | grep -oP 'All files\s+\|\s+\K\d+(?=\.\d+)' || echo "0")
+        if [ "$COVERAGE" -lt 50 ]; then
+          echo "❌ Coverage below threshold: $COVERAGE%"
+          exit 1
+        fi
+        
+        echo "✅ All quality gates passed"
+        
+    - name: Auto-approve if criteria met
+      uses: actions/github-script@v7
+      if: success()
+      with:
+        script: |
+          // Auto-approve PRs that pass all checks
+          await github.rest.pulls.createReview({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            pull_number: context.issue.number,
+            event: 'APPROVE',
+            body: '🤖 Automated approval: All quality gates passed'
+          });
+
+  # Merge prevention for failing checks
+  merge-prevention:
+    name: Merge Prevention
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18.x'
+        cache: 'npm'
+        
+    - name: Critical checks
+      run: |
+        npm ci
+        
+        echo "🚨 Running critical checks..."
+        
+        # These failures should block merge
+        BLOCK_MERGE=false
+        
+        if ! npm run build; then
+          echo "::error::TypeScript compilation failed - merge blocked"
+          BLOCK_MERGE=true
+        fi
+        
+        if ! npm run lint; then
+          echo "::error::Linting failed - merge blocked"  
+          BLOCK_MERGE=true
+        fi
+        
+        if ! npm test; then
+          echo "::error::Tests failed - merge blocked"
+          BLOCK_MERGE=true
+        fi
+        
+        if [ "$BLOCK_MERGE" = true ]; then
+          echo "::error::Critical checks failed - this PR cannot be merged"
+          exit 1
+        fi
+        
+        echo "✅ All critical checks passed"
